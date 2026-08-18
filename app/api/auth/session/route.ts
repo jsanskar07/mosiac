@@ -7,7 +7,7 @@ import {
 } from "@/src/platform/auth/central-rbac";
 import {
   ACCESS_COOKIE,
-  clearSessionCookies,
+  clearAccessCookie,
 } from "@/src/platform/auth/session-cookies";
 import { apiError, requestId } from "@/src/platform/http/responses";
 
@@ -19,31 +19,25 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    const [identities, sessions] = await Promise.all([
-      centralRbacRequest("/api/v2/me/identities", {
-        accessToken,
-        requestId: id,
-      }),
-      centralRbacRequest("/api/v2/me/sessions", {
-        accessToken,
-        requestId: id,
-      }),
-    ]);
+    const identities = await centralRbacRequest("/api/v2/me/identities", {
+      accessToken,
+      requestId: id,
+    });
 
-    if (!identities.ok || !sessions.ok) {
-      const rejected = !identities.ok ? identities : sessions;
+    if (!identities.ok) {
       const response = apiError(
-        rejected.status,
+        identities.status,
         "SESSION_REJECTED",
-        upstreamMessage(rejected.body, "Session is invalid or expired"),
+        upstreamMessage(identities.body, "Session is invalid or expired"),
         id,
       );
-      if (rejected.status === 401) clearSessionCookies(response);
+      // Keep the refresh cookie so the client can renew an expired access token.
+      if (identities.status === 401) clearAccessCookie(response);
       return response;
     }
 
     return NextResponse.json(
-      { identities: identities.body?.identities ?? [], sessions: sessions.body?.sessions ?? [] },
+      { identities: identities.body?.identities ?? [] },
       { headers: { "x-request-id": id, "cache-control": "no-store" } },
     );
   } catch (error) {

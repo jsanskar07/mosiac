@@ -38,7 +38,15 @@ test("renders the Mosaic feed for an authenticated visitor", async () => {
   const html = await response.text();
   assert.match(html, /Mosaic — Share a life in color/i);
   assert.match(html, /Your feed/i);
-  assert.match(html, /Amelia Stone/i);
+  assert.match(html, /Welcome back/i);
+  assert.match(html, /loading="lazy"/i);
+  assert.match(html, /Mosaic member/i);
+  assert.match(html, /Discover/i);
+  assert.match(html, /Messages/i);
+  assert.match(html, /Activity/i);
+  assert.match(html, /Profile/i);
+  assert.doesNotMatch(html, /Amelia Stone/i);
+  assert.doesNotMatch(html, /Sunday, August 16/i);
   assert.doesNotMatch(html, /Sign in to Mosaic|codex-preview/i);
 });
 
@@ -164,6 +172,44 @@ test("moves Central RBAC session tokens into HTTP-only cookies", async () => {
     });
     assert.equal(feed.status, 200);
     assert.match(await feed.text(), /Your feed/i);
+  } finally {
+    await new Promise((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    if (previousUrl === undefined) delete process.env.CENTRAL_RBAC_URL;
+    else process.env.CENTRAL_RBAC_URL = previousUrl;
+    if (previousKey === undefined) delete process.env.CENTRAL_RBAC_PROJECT_API_KEY;
+    else process.env.CENTRAL_RBAC_PROJECT_API_KEY = previousKey;
+  }
+});
+
+test("preserves the refresh cookie when an access token expires", async () => {
+  const server = createServer((incoming, outgoing) => {
+    assert.equal(incoming.url, "/api/v2/me/identities");
+    assert.equal(incoming.headers.authorization, "Bearer expired-access");
+    outgoing.writeHead(401, { "content-type": "application/json" });
+    outgoing.end(JSON.stringify({ error: "Access token expired" }));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+
+  const previousUrl = process.env.CENTRAL_RBAC_URL;
+  const previousKey = process.env.CENTRAL_RBAC_PROJECT_API_KEY;
+  process.env.CENTRAL_RBAC_URL = `http://127.0.0.1:${address.port}`;
+  process.env.CENTRAL_RBAC_PROJECT_API_KEY = "mosaic-test-key";
+
+  try {
+    const response = await request("/api/auth/session", {
+      headers: {
+        accept: "application/json",
+        cookie: "mosaic_access=expired-access; mosaic_refresh=still-valid",
+      },
+    });
+    assert.equal(response.status, 401);
+    const cookies = response.headers.get("set-cookie") ?? "";
+    assert.match(cookies, /mosaic_access=/i);
+    assert.doesNotMatch(cookies, /mosaic_refresh=/i);
   } finally {
     await new Promise((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),

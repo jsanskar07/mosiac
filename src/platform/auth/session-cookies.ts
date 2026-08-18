@@ -31,16 +31,20 @@ export function setSessionCookies(
 }
 
 export function clearSessionCookies(response: NextResponse): void {
-  response.cookies.set(ACCESS_COOKIE, "", {
-    httpOnly: true,
-    sameSite: "lax",
-    path: "/",
-    maxAge: 0,
-  });
+  clearAccessCookie(response);
   response.cookies.set(REFRESH_COOKIE, "", {
     httpOnly: true,
     sameSite: "lax",
     path: "/api/auth",
+    maxAge: 0,
+  });
+}
+
+export function clearAccessCookie(response: NextResponse): void {
+  response.cookies.set(ACCESS_COOKIE, "", {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
     maxAge: 0,
   });
 }

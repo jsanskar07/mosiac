@@ -22,7 +22,24 @@ import {
   X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+
+type Viewer = {
+  displayName: string;
+  handle: string;
+  identifier: string;
+};
+
+type SessionIdentity = {
+  type?: string;
+  identifier?: string;
+};
+
+const defaultViewer: Viewer = {
+  displayName: "Mosaic member",
+  handle: "@mosaic.member",
+  identifier: "Signed in",
+};
 
 const stories = [
   { name: "Your story", image: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=180&q=85", own: true },
@@ -68,6 +85,16 @@ const initialPosts = [
   },
 ];
 
+const discoverPosts = [
+  ...initialPosts,
+  ...initialPosts.map((post) => ({ ...post, id: post.id + initialPosts.length })),
+];
+
+const countFormatter = new Intl.NumberFormat("en", {
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
+
 const nav = [
   { label: "Home", icon: Home },
   { label: "Discover", icon: Compass },
@@ -77,7 +104,31 @@ const nav = [
 ];
 
 function formatCount(value: number) {
-  return new Intl.NumberFormat("en", { notation: value > 999 ? "compact" : "standard", maximumFractionDigits: 1 }).format(value);
+  return value > 999 ? countFormatter.format(value) : String(value);
+}
+
+function viewerFromIdentities(identities: SessionIdentity[]): Viewer {
+  const identity = identities.find((item) => item.type === "email") ?? identities[0];
+  const identifier = identity?.identifier?.trim();
+  if (!identifier) return defaultViewer;
+
+  const base = identity?.type === "email" ? identifier.split("@")[0] : "mosaic member";
+  const words = base
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1));
+  const displayName = words.join(" ") || "Mosaic member";
+  const handleBase = base.toLowerCase().replace(/[^a-z0-9._]+/g, ".");
+
+  return {
+    displayName,
+    handle: `@${handleBase || "mosaic.member"}`,
+    identifier,
+  };
+}
+
+function initials(name: string) {
+  return name.split(/\s+/).slice(0, 2).map((word) => word[0]).join("").toUpperCase() || "M";
 }
 
 export default function MosaicFeed() {
@@ -91,6 +142,51 @@ export default function MosaicFeed() {
   const [commentsOpen, setCommentsOpen] = useState<number | null>(null);
   const [comment, setComment] = useState("");
   const [toast, setToast] = useState("");
+  const [viewer, setViewer] = useState<Viewer>(defaultViewer);
+  const toastTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadViewer() {
+      try {
+        let response = await fetch("/api/auth/session", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (response.status === 401) {
+          const refresh = await fetch("/api/auth/refresh", {
+            method: "POST",
+            signal: controller.signal,
+          });
+          if (refresh.ok) {
+            response = await fetch("/api/auth/session", {
+              cache: "no-store",
+              signal: controller.signal,
+            });
+          }
+        }
+        if (response.status === 401) {
+          router.replace("/auth");
+          return;
+        }
+        if (!response.ok) return;
+        const body = await response.json() as { identities?: SessionIdentity[] };
+        setViewer(viewerFromIdentities(body.identities ?? []));
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          setViewer(defaultViewer);
+        }
+      }
+    }
+
+    void loadViewer();
+    return () => controller.abort();
+  }, [router]);
+
+  useEffect(() => () => {
+    if (toastTimer.current !== null) window.clearTimeout(toastTimer.current);
+  }, []);
 
   const selectedPost = useMemo(
     () => initialPosts.find((post) => post.id === commentsOpen),
@@ -99,7 +195,8 @@ export default function MosaicFeed() {
 
   function flash(message: string) {
     setToast(message);
-    window.setTimeout(() => setToast(""), 2400);
+    if (toastTimer.current !== null) window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(""), 2400);
   }
 
   function toggleItem(id: number, setter: React.Dispatch<React.SetStateAction<number[]>>) {
@@ -137,10 +234,8 @@ export default function MosaicFeed() {
               <button
                 key={item.label}
                 className={`nav-item ${activeNav === item.label ? "active" : ""}`}
-                onClick={() => {
-                  setActiveNav(item.label);
-                  if (item.label !== "Home") flash(`${item.label} opened`);
-                }}
+                onClick={() => setActiveNav(item.label)}
+                aria-current={activeNav === item.label ? "page" : undefined}
               >
                 <span className="nav-icon-wrap">
                   <Icon size={21} strokeWidth={activeNav === item.label ? 2.5 : 1.9} />
@@ -158,14 +253,14 @@ export default function MosaicFeed() {
           <span>Create post</span>
         </button>
 
-        <div className="sidebar-profile" aria-label="Signed in as Amelia Stone">
-          <img src="https://images.unsplash.com/photo-1531123897727-8f129e1688ce?auto=format&fit=crop&w=120&q=85" alt="Amelia Stone" />
+        <button className="sidebar-profile" aria-label={`Open ${viewer.displayName}'s profile`} onClick={() => setActiveNav("Profile")}>
+          <span className="viewer-avatar" aria-hidden="true">{initials(viewer.displayName)}</span>
           <div>
-            <strong>Amelia Stone</strong>
-            <span>@amelia.stone</span>
+            <strong>{viewer.displayName}</strong>
+            <span>{viewer.handle}</span>
           </div>
           <MoreHorizontal size={19} />
-        </div>
+        </button>
 
         <button className="more-button" onClick={signOut}>
           <LogOut size={20} /> <span>Sign out</span>
@@ -174,17 +269,19 @@ export default function MosaicFeed() {
 
       <section className="feed-column">
         <header className="mobile-header">
-          <button className="wordmark" aria-label="Mosaic home">mosaic<span>.</span></button>
+          <button className="wordmark" aria-label="Mosaic home" onClick={() => setActiveNav("Home")}>mosaic<span>.</span></button>
           <div>
             <button className="icon-button" aria-label="Open search" onClick={() => setSearchOpen(true)}><Search size={21} /></button>
-            <button className="icon-button mobile-heart" aria-label="View activity" onClick={() => flash("Activity opened")}><Heart size={22} /></button>
+            <button className="icon-button mobile-heart" aria-label="View activity" onClick={() => setActiveNav("Activity")}><Heart size={22} /></button>
           </div>
         </header>
 
+        {activeNav === "Home" ? (
+          <>
         <div className="feed-topbar">
           <div>
-            <p>Sunday, August 16</p>
-            <h1>Good morning, Amelia</h1>
+            <p>Your daily Mosaic</p>
+            <h1>Welcome back, {viewer.displayName.split(" ")[0]}</h1>
           </div>
           <div className="topbar-actions">
             <button className="round-search" onClick={() => setSearchOpen(true)} aria-label="Search mosaic"><Search size={20} /></button>
@@ -200,7 +297,7 @@ export default function MosaicFeed() {
             {stories.map((story) => (
               <button key={story.name} className="story" onClick={() => flash(story.own ? "Add to your story" : `${story.name}’s story opened`)}>
                 <span className={`story-ring ${story.own ? "own" : ""}`}>
-                  <img src={story.image} alt="" />
+                  <img src={story.image} alt="" width="180" height="180" decoding="async" />
                   {story.own && <span className="story-add"><Plus size={12} strokeWidth={3} /></span>}
                 </span>
                 <span>{story.name}</span>
@@ -231,7 +328,7 @@ export default function MosaicFeed() {
                 <header className="post-header">
                   <div className="post-author">
                     <span className="avatar-ring" style={{ "--ring-accent": post.accent } as React.CSSProperties}>
-                      <img src={post.avatar} alt={post.author} />
+                      <img src={post.avatar} alt={post.author} width="120" height="120" loading="lazy" decoding="async" />
                     </span>
                     <div>
                       <strong>{post.author}</strong>
@@ -242,7 +339,14 @@ export default function MosaicFeed() {
                 </header>
 
                 <button className="post-image-button" onDoubleClick={() => !isLiked && setLiked((items) => [...items, post.id])} aria-label={`Like ${post.author}'s post`}>
-                  <img className="post-image" src={post.image} alt={`${post.author}'s recent moment`} />
+                  <img
+                    className="post-image"
+                    src={post.image}
+                    alt={`${post.author}'s recent moment`}
+                    loading={post.id === 1 ? "eager" : "lazy"}
+                    decoding="async"
+                    fetchPriority={post.id === 1 ? "high" : "auto"}
+                  />
                   <span className="photo-index">1 / {post.id === 1 ? 3 : 2}</span>
                 </button>
 
@@ -267,6 +371,15 @@ export default function MosaicFeed() {
             );
           })}
         </div>
+          </>
+        ) : (
+          <SecondaryView
+            activeNav={activeNav}
+            viewer={viewer}
+            onCreate={() => setComposerOpen(true)}
+            onNavigate={setActiveNav}
+          />
+        )}
       </section>
 
       <aside className="right-rail">
@@ -287,7 +400,7 @@ export default function MosaicFeed() {
                 const isFollowing = following.includes(person.name);
                 return (
                   <div className="suggestion" key={person.name}>
-                    <img src={person.image} alt={person.name} />
+                    <img src={person.image} alt={person.name} width="120" height="120" loading="lazy" decoding="async" />
                     <div>
                       <strong>{person.name}</strong>
                       <span>{person.handle}</span>
@@ -323,11 +436,11 @@ export default function MosaicFeed() {
       </aside>
 
       <nav className="mobile-nav" aria-label="Mobile navigation">
-        <button className="active" aria-label="Home"><Home size={23} fill="currentColor" /></button>
-        <button aria-label="Discover" onClick={() => flash("Discover opened")}><Compass size={23} /></button>
+        <button className={activeNav === "Home" ? "active" : ""} aria-label="Home" onClick={() => setActiveNav("Home")}><Home size={23} fill={activeNav === "Home" ? "currentColor" : "none"} /></button>
+        <button className={activeNav === "Discover" ? "active" : ""} aria-label="Discover" onClick={() => setActiveNav("Discover")}><Compass size={23} /></button>
         <button className="mobile-create" aria-label="Create post" onClick={() => setComposerOpen(true)}><Plus size={22} /></button>
-        <button aria-label="Messages" onClick={() => flash("Messages opened")}><MessageCircle size={23} /></button>
-        <button className="mobile-avatar" aria-label="Profile"><img src="https://images.unsplash.com/photo-1531123897727-8f129e1688ce?auto=format&fit=crop&w=80&q=85" alt="" /></button>
+        <button className={activeNav === "Messages" ? "active" : ""} aria-label="Messages" onClick={() => setActiveNav("Messages")}><MessageCircle size={23} /></button>
+        <button className={`mobile-avatar ${activeNav === "Profile" ? "active" : ""}`} aria-label="Profile" onClick={() => setActiveNav("Profile")}><span aria-hidden="true">{initials(viewer.displayName)}</span></button>
       </nav>
 
       {searchOpen && (
@@ -356,8 +469,8 @@ export default function MosaicFeed() {
           <button className="modal-backdrop" onClick={() => setCommentsOpen(null)} aria-label="Close comments" />
           <div className="comments-modal">
             <div className="modal-title"><h2 id="comments-title">Comments</h2><button className="icon-button" onClick={() => setCommentsOpen(null)} aria-label="Close"><X size={21} /></button></div>
-            <div className="comment-sample"><img src={selectedPost.avatar} alt="" /><p><strong>{selectedPost.handle}</strong> {selectedPost.caption}</p></div>
-            <div className="comment-sample"><img src={stories[2].image} alt="" /><p><strong>@theo.frames</strong> The colors in this are everything ✨</p></div>
+            <div className="comment-sample"><img src={selectedPost.avatar} alt="" width="120" height="120" loading="lazy" decoding="async" /><p><strong>{selectedPost.handle}</strong> {selectedPost.caption}</p></div>
+            <div className="comment-sample"><img src={stories[2].image} alt="" width="180" height="180" loading="lazy" decoding="async" /><p><strong>@theo.frames</strong> The colors in this are everything ✨</p></div>
             <form className="comment-form" onSubmit={submitComment}>
               <input value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Add a kind comment…" aria-label="Comment" />
               <button type="submit" disabled={!comment.trim()}>Post</button>
@@ -368,5 +481,77 @@ export default function MosaicFeed() {
 
       {toast && <div className="toast" role="status">{toast}</div>}
     </main>
+  );
+}
+
+function SecondaryView({
+  activeNav,
+  viewer,
+  onCreate,
+  onNavigate,
+}: {
+  activeNav: string;
+  viewer: Viewer;
+  onCreate: () => void;
+  onNavigate: (view: string) => void;
+}) {
+  if (activeNav === "Discover") {
+    return (
+      <section className="workspace-view" aria-labelledby="discover-heading">
+        <div className="view-heading"><p>Explore Mosaic</p><h1 id="discover-heading">Discover</h1><span>Fresh ideas, places, and creators picked for you.</span></div>
+        <div className="discover-tags"><button>#LifeInColor</button><button>#SlowLiving</button><button>#MadeByHand</button><button>#CityLight</button></div>
+        <div className="discover-grid">
+          {discoverPosts.map((post) => (
+            <button key={post.id} onClick={() => onNavigate("Home")} aria-label={`View ${post.author}'s post in Home`}>
+              <img src={post.image} alt={`${post.author}'s discovery post`} loading="lazy" decoding="async" />
+              <span><Heart size={15} fill="currentColor" /> {formatCount(post.likes)}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+    );
+  }
+
+  if (activeNav === "Messages") {
+    return (
+      <section className="workspace-view" aria-labelledby="messages-heading">
+        <div className="view-heading"><p>Your circle</p><h1 id="messages-heading">Messages</h1><span>Three conversations are waiting for you.</span></div>
+        <div className="message-list">
+          {suggestions.map((person, index) => (
+            <button key={person.name} className="message-row">
+              <img src={person.image} alt="" width="120" height="120" loading="lazy" decoding="async" />
+              <span><strong>{person.name}</strong><small>{index === 0 ? "Sent you a photo" : index === 1 ? "That color palette is perfect!" : "Coffee this weekend?"}</small></span>
+              <time>{index + 2}m</time>
+            </button>
+          ))}
+        </div>
+      </section>
+    );
+  }
+
+  if (activeNav === "Activity") {
+    return (
+      <section className="workspace-view" aria-labelledby="activity-heading">
+        <div className="view-heading"><p>Since yesterday</p><h1 id="activity-heading">Activity</h1><span>New moments from the people in your circle.</span></div>
+        <div className="activity-list">
+          <div><Heart size={18} /><p><strong>Maya and 12 others</strong> liked your latest post.</p><time>8m</time></div>
+          <div><UserRound size={18} /><p><strong>Elena Rossi</strong> started following you.</p><time>1h</time></div>
+          <div><MessageCircle size={18} /><p><strong>Theo</strong> commented: “This feels like summer.”</p><time>3h</time></div>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="workspace-view" aria-labelledby="profile-heading">
+      <div className="profile-hero">
+        <span className="profile-avatar" aria-hidden="true">{initials(viewer.displayName)}</span>
+        <div><p>Your Mosaic profile</p><h1 id="profile-heading">{viewer.displayName}</h1><span>{viewer.handle}</span></div>
+        <button onClick={onCreate}><Plus size={17} /> New post</button>
+      </div>
+      <div className="profile-stats"><span><strong>0</strong> posts</span><span><strong>0</strong> followers</span><span><strong>0</strong> following</span></div>
+      <div className="profile-details"><p>Signed-in identity</p><strong>{viewer.identifier}</strong><span>Your display name currently comes from your verified email address. Profile editing will be added with persistent profiles.</span></div>
+      <div className="profile-empty"><ImagePlus size={28} /><strong>Share your first moment</strong><span>Your posts will appear here.</span><button onClick={onCreate}>Create post</button></div>
+    </section>
   );
 }

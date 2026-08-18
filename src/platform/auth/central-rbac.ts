@@ -22,6 +22,8 @@ type CentralRequestOptions = {
   requestId: string;
 };
 
+const centralRequestTimeoutMs = 15_000;
+
 export async function centralRbacRequest(
   pathname: string,
   options: CentralRequestOptions,
@@ -47,6 +49,7 @@ export async function centralRbacRequest(
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
     cache: "no-store",
     redirect: "error",
+    signal: AbortSignal.timeout(centralRequestTimeoutMs),
   });
 
   return {
