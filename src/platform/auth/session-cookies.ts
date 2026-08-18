@@ -46,7 +46,9 @@ export function clearSessionCookies(response: NextResponse): void {
 }
 
 function isSecureRequest(request: NextRequest): boolean {
-  return (
-    request.nextUrl.protocol === "https:" || process.env.NODE_ENV === "production"
-  );
+  const forwardedProtocol = request.headers
+    .get("x-forwarded-proto")
+    ?.split(",")[0]
+    ?.trim();
+  return request.nextUrl.protocol === "https:" || forwardedProtocol === "https";
 }

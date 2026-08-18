@@ -21,14 +21,25 @@ async function request(pathname, init) {
   );
 }
 
-test("renders the Mosaic home experience", async () => {
+test("redirects signed-out visitors to authentication", async () => {
   const response = await request("/", { headers: { accept: "text/html" } });
+  assert.equal(response.status, 307);
+  assert.equal(new URL(response.headers.get("location"), "http://localhost").pathname, "/auth");
+});
+
+test("renders the Mosaic feed for an authenticated visitor", async () => {
+  const response = await request("/", {
+    headers: {
+      accept: "text/html",
+      cookie: "mosaic_access=access-secret",
+    },
+  });
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /Mosaic — Share a life in color/i);
   assert.match(html, /Your feed/i);
-  assert.match(html, /Sign in to Mosaic/i);
-  assert.doesNotMatch(html, /Your site is taking shape|codex-preview/i);
+  assert.match(html, /Amelia Stone/i);
+  assert.doesNotMatch(html, /Sign in to Mosaic|codex-preview/i);
 });
 
 test("renders email and mobile authentication choices", async () => {
@@ -39,6 +50,17 @@ test("renders email and mobile authentication choices", async () => {
   assert.match(html, /Email/i);
   assert.match(html, /Mobile/i);
   assert.match(html, /Keep the moments that make life yours/i);
+});
+
+test("redirects authenticated visitors away from authentication", async () => {
+  const response = await request("/auth", {
+    headers: {
+      accept: "text/html",
+      cookie: "mosaic_access=access-secret",
+    },
+  });
+  assert.equal(response.status, 307);
+  assert.equal(new URL(response.headers.get("location"), "http://localhost").pathname, "/");
 });
 
 test("exposes a versioned health response", async () => {
@@ -132,6 +154,16 @@ test("moves Central RBAC session tokens into HTTP-only cookies", async () => {
     assert.match(cookies, /mosaic_access=access-secret/i);
     assert.match(cookies, /mosaic_refresh=refresh-secret/i);
     assert.match(cookies, /HttpOnly/i);
+    assert.doesNotMatch(cookies, /; Secure/i);
+
+    const feed = await request("/", {
+      headers: {
+        accept: "text/html",
+        cookie: "mosaic_access=access-secret",
+      },
+    });
+    assert.equal(feed.status, 200);
+    assert.match(await feed.text(), /Your feed/i);
   } finally {
     await new Promise((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),
