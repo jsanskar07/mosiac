@@ -1770,6 +1770,23 @@ input:focus-visible {
   box-shadow: 0 3px 12px rgba(29, 27, 22, 0.08);
 }
 
+.auth-methods button:disabled,
+.auth-intents button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.auth-methods button small {
+  padding: 2px 5px;
+  border-radius: 5px;
+  background: #e2dfd7;
+  color: #77736d;
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .auth-intents {
   margin-top: 22px;
   display: flex;
@@ -1878,6 +1895,18 @@ input:focus-visible {
   border-radius: 10px;
   background: #fff1ee;
   color: #a2392b;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.auth-notice {
+  margin: 0;
+  padding: 11px 13px;
+  border: 1px solid #cbdccf;
+  border-radius: 10px;
+  background: #f1f8f2;
+  color: #35643d;
   font-size: 11px;
   font-weight: 650;
   line-height: 1.45;

@@ -17,6 +17,7 @@ import {
   isSameOrigin,
   requestId,
 } from "@/src/platform/http/responses";
+import { getAuthCapabilities } from "@/src/platform/config/server";
 
 const routeMap = {
   "email/register": "/api/v2/auth/email/register",
@@ -54,6 +55,27 @@ export async function POST(
   const upstreamPath = routeMap[routeKey];
   if (!upstreamPath) {
     return apiError(404, "AUTH_ROUTE_NOT_FOUND", "Authentication route not found", id);
+  }
+
+  const capabilities = getAuthCapabilities();
+  if (routeKey.startsWith("otp/") && !capabilities.mobileOtp) {
+    return apiError(
+      404,
+      "AUTH_METHOD_DISABLED",
+      "Mobile verification is not available",
+      id,
+    );
+  }
+  if (
+    (routeKey.startsWith("email/") || routeKey.startsWith("password/recovery/")) &&
+    !capabilities.emailVerification
+  ) {
+    return apiError(
+      404,
+      "AUTH_METHOD_DISABLED",
+      "Email verification is not available",
+      id,
+    );
   }
 
   let body: unknown;
@@ -94,6 +116,9 @@ export async function POST(
       );
       if (routeKey === "refresh" || routeKey === "logout") {
         clearSessionCookies(response);
+      }
+      if (upstream.status === 429 && upstream.retryAfter) {
+        response.headers.set("retry-after", upstream.retryAfter);
       }
       return response;
     }
@@ -144,14 +169,18 @@ export async function POST(
     });
   } catch (error) {
     if (error instanceof ServerConfigurationError) {
-      return apiError(503, "AUTH_NOT_CONFIGURED", error.message, id);
+      const response = apiError(503, "AUTH_NOT_CONFIGURED", error.message, id);
+      if (routeKey === "logout") clearSessionCookies(response);
+      return response;
     }
-    return apiError(
+    const response = apiError(
       502,
       "AUTH_SERVICE_UNAVAILABLE",
       "Authentication service is temporarily unavailable",
       id,
     );
+    if (routeKey === "logout") clearSessionCookies(response);
+    return response;
   }
 }
 

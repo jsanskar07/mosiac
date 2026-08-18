@@ -4,9 +4,11 @@ import { CheckCircle2, LockKeyhole, Mail, Phone } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
+import type { AuthCapabilities } from "@/src/platform/config/server";
+
 type Method = "email" | "mobile";
-type Intent = "login" | "register";
-type Step = "credentials" | "email-code" | "otp-code";
+type Intent = "login" | "register" | "recover";
+type Step = "credentials" | "email-code" | "otp-code" | "recovery-code";
 
 type ApiResult = {
   challenge_id?: number;
@@ -16,21 +18,28 @@ type ApiResult = {
   message?: string;
 };
 
-export default function AuthForm() {
+type AuthFormProps = {
+  capabilities: AuthCapabilities;
+};
+
+export default function AuthForm({ capabilities }: AuthFormProps) {
   const router = useRouter();
   const [method, setMethod] = useState<Method>("email");
   const [intent, setIntent] = useState<Intent>("login");
   const [step, setStep] = useState<Step>("credentials");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
   const [mobile, setMobile] = useState("");
   const [verification, setVerification] = useState("");
   const [challengeId, setChallengeId] = useState<number | null>(null);
   const [debugValue, setDebugValue] = useState("");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
 
   function chooseMethod(next: Method) {
+    if (next === "mobile" && !capabilities.mobileOtp) return;
     setMethod(next);
     resetChallenge();
   }
@@ -46,6 +55,7 @@ export default function AuthForm() {
     setChallengeId(null);
     setDebugValue("");
     setError("");
+    setNotice("");
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -65,9 +75,28 @@ export default function AuthForm() {
         });
         return;
       }
+      if (step === "recovery-code") {
+        await post("/api/auth/password/recovery/complete", {
+          token: verification,
+          new_password: newPassword,
+        });
+        setIntent("login");
+        setStep("credentials");
+        setPassword("");
+        setNewPassword("");
+        setVerification("");
+        setNotice("Password updated. Sign in with your new password.");
+        return;
+      }
 
       if (method === "email" && intent === "login") {
         await completeSession("/api/auth/password/login", { email, password });
+        return;
+      }
+      if (method === "email" && intent === "recover") {
+        const result = await post("/api/auth/password/recovery/request", { email });
+        setStep("recovery-code");
+        setDebugValue(result.debug_token ?? "");
         return;
       }
       if (method === "email") {
@@ -100,14 +129,32 @@ export default function AuthForm() {
     router.refresh();
   }
 
+  async function resendEmailToken() {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await post("/api/auth/email/verification/request", { email });
+      setDebugValue(result.debug_token ?? "");
+      setNotice("A new verification email has been requested.");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Something went wrong");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const heading =
     step === "email-code"
       ? "Verify your email"
       : step === "otp-code"
         ? "Enter the text code"
-        : intent === "register"
-          ? "Create your account"
-          : "Welcome back";
+        : step === "recovery-code"
+          ? "Reset your password"
+          : intent === "recover"
+            ? "Recover your account"
+            : intent === "register"
+              ? "Create your account"
+              : "Welcome back";
 
   return (
     <main className="auth-shell">
@@ -159,8 +206,11 @@ export default function AuthForm() {
                   aria-selected={method === "mobile"}
                   className={method === "mobile" ? "active" : ""}
                   onClick={() => chooseMethod("mobile")}
+                  disabled={!capabilities.mobileOtp}
+                  title={!capabilities.mobileOtp ? "Mobile sign-in is not available yet" : undefined}
                 >
                   <Phone size={17} /> Mobile
+                  {!capabilities.mobileOtp && <small>Unavailable</small>}
                 </button>
               </div>
 
@@ -176,6 +226,7 @@ export default function AuthForm() {
                   type="button"
                   className={intent === "register" ? "active" : ""}
                   onClick={() => chooseIntent("register")}
+                  disabled={!capabilities.emailVerification}
                 >
                   Create account
                 </button>
@@ -197,19 +248,30 @@ export default function AuthForm() {
                     required
                   />
                 </label>
-                <label>
-                  Password
-                  <input
-                    type="password"
-                    autoComplete={intent === "register" ? "new-password" : "current-password"}
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    placeholder={intent === "register" ? "12–72 characters" : "Your password"}
-                    minLength={intent === "register" ? 12 : 1}
-                    maxLength={72}
-                    required
-                  />
-                </label>
+                {intent !== "recover" && (
+                  <label>
+                    Password
+                    <input
+                      type="password"
+                      autoComplete={intent === "register" ? "new-password" : "current-password"}
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                      placeholder={intent === "register" ? "12–72 characters" : "Your password"}
+                      minLength={intent === "register" ? 12 : 1}
+                      maxLength={72}
+                      required
+                    />
+                  </label>
+                )}
+                {intent === "login" && capabilities.passwordRecovery && (
+                  <button
+                    type="button"
+                    className="auth-reset"
+                    onClick={() => chooseIntent("recover")}
+                  >
+                    Forgot your password?
+                  </button>
+                )}
               </>
             )}
 
@@ -245,6 +307,22 @@ export default function AuthForm() {
               </label>
             )}
 
+            {step === "recovery-code" && (
+              <label>
+                New password
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={newPassword}
+                  onChange={(event) => setNewPassword(event.target.value)}
+                  placeholder="12–72 characters"
+                  minLength={12}
+                  maxLength={72}
+                  required
+                />
+              </label>
+            )}
+
             {debugValue && (
               <button
                 type="button"
@@ -256,22 +334,43 @@ export default function AuthForm() {
             )}
 
             {error && <p className="auth-error" role="alert">{error}</p>}
+            {notice && <p className="auth-notice" role="status">{notice}</p>}
 
             <button className="auth-submit" type="submit" disabled={busy}>
               {busy
                 ? "Please wait…"
                 : step !== "credentials"
                   ? "Verify and continue"
-                  : method === "mobile"
-                    ? "Send verification code"
-                    : intent === "register"
-                      ? "Create account"
-                      : "Sign in"}
+                  : intent === "recover"
+                    ? "Send recovery email"
+                    : method === "mobile"
+                      ? "Send verification code"
+                      : intent === "register"
+                        ? "Create account"
+                        : "Sign in"}
             </button>
 
             {step !== "credentials" && (
-              <button type="button" className="auth-reset" onClick={resetChallenge}>
-                Use a different {method === "email" ? "email" : "number"}
+              <>
+                {step === "email-code" && (
+                  <button
+                    type="button"
+                    className="auth-reset"
+                    disabled={busy}
+                    onClick={() => void resendEmailToken()}
+                  >
+                    Send a new verification email
+                  </button>
+                )}
+                <button type="button" className="auth-reset" onClick={resetChallenge}>
+                  Use a different {method === "email" ? "email" : "number"}
+                </button>
+              </>
+            )}
+
+            {step === "credentials" && intent === "recover" && (
+              <button type="button" className="auth-reset" onClick={() => chooseIntent("login")}>
+                Back to sign in
               </button>
             )}
           </form>
@@ -294,7 +393,13 @@ async function post(path: string, body: unknown): Promise<ApiResult> {
   });
   const result = (await response.json().catch(() => ({}))) as ApiResult;
   if (!response.ok) {
-    throw new Error(result.error?.message ?? "The request could not be completed");
+    const retryAfter = response.headers.get("retry-after");
+    const suffix = response.status === 429 && retryAfter
+      ? ` Try again in ${retryAfter} seconds.`
+      : "";
+    throw new Error(
+      `${result.error?.message ?? "The request could not be completed"}${suffix}`,
+    );
   }
   return result;
 }

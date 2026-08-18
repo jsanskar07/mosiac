@@ -9,6 +9,8 @@ services:
     environment:
       CENTRAL_RBAC_URL: ${CENTRAL_RBAC_URL:-https://central-auth-pe9z.onrender.com}
       CENTRAL_RBAC_PROJECT_API_KEY: ${CENTRAL_RBAC_PROJECT_API_KEY:-}
+      MOSAIC_EMAIL_VERIFICATION_ENABLED: ${MOSAIC_EMAIL_VERIFICATION_ENABLED:-true}
+      MOSAIC_MOBILE_OTP_ENABLED: ${MOSAIC_MOBILE_OTP_ENABLED:-false}
       MOSAIC_VERSION: docker-local
       NODE_ENV: production
       PORT: "3000"

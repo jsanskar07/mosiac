@@ -7,6 +7,7 @@ export type CentralRbacResponse = {
   ok: boolean;
   status: number;
   body: Record<string, unknown> | null;
+  retryAfter: string | null;
 };
 
 export type SessionTokens = {
@@ -56,6 +57,7 @@ export async function centralRbacRequest(
     ok: response.ok,
     status: response.status,
     body: await parseJson(response),
+    retryAfter: response.headers.get("retry-after"),
   };
 }
 

@@ -7,7 +7,8 @@ Mosaic is a photo-first social network built with React, Vinext, and TypeScript.
 The initial foundation includes:
 
 - the responsive Mosaic feed interface;
-- email/password and mobile/OTP entry flows;
+- email/password registration, verification, recovery, and login flows;
+- capability-gated mobile/OTP entry that stays disabled until SMS is configured;
 - a server-only Central RBAC adapter;
 - secure HTTP-only access and rotating refresh cookies;
 - same-origin protection for authentication mutations;
@@ -40,7 +41,14 @@ The command prints the new project key once. Move it directly into the deploymen
 ```text
 CENTRAL_RBAC_URL=https://central-auth-pe9z.onrender.com
 CENTRAL_RBAC_PROJECT_API_KEY=<Mosaic project key>
+MOSAIC_EMAIL_VERIFICATION_ENABLED=true
+MOSAIC_MOBILE_OTP_ENABLED=false
 ```
+
+The two Mosaic capability switches must mirror the corresponding Central RBAC
+deployment flags. Keep mobile OTP disabled until Central RBAC has a working SMS
+provider. These switches are safe to expose through `GET /api/auth/capabilities`;
+provider credentials and the Central RBAC project key remain server-only.
 
 ## Local Docker setup
 
@@ -80,6 +88,7 @@ Available browser routes:
 - `POST /api/auth/refresh`
 - `POST /api/auth/logout`
 - `GET /api/auth/session`
+- `GET /api/auth/capabilities`
 
 Operational routes:
 
