@@ -1,0 +1,15 @@
+services:
+  mosaic:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mosaic-social:local
+    ports:
+      - "3000:3000"
+    environment:
+      CENTRAL_RBAC_URL: ${CENTRAL_RBAC_URL:-https://central-auth-pe9z.onrender.com}
+      CENTRAL_RBAC_PROJECT_API_KEY: ${CENTRAL_RBAC_PROJECT_API_KEY:-}
+      MOSAIC_VERSION: docker-local
+      NODE_ENV: production
+      PORT: "3000"
+    restart: unless-stopped

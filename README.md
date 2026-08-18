@@ -38,8 +38,29 @@ npm run auth:register-project
 The command prints the new project key once. Move it directly into the deployment secret manager; do not add it to `.env.example`, source control, tickets, or chat.
 
 ```text
-CENTRAL_RBAC_URL=http://localhost:9000
+CENTRAL_RBAC_URL=https://central-auth-pe9z.onrender.com
 CENTRAL_RBAC_PROJECT_API_KEY=<Mosaic project key>
+```
+
+## Local Docker setup
+
+Docker runs the production build locally on `http://127.0.0.1:3000` and uses
+the deployed Central Auth service by default.
+
+```bash
+cp .env.example .env
+# Replace CENTRAL_RBAC_PROJECT_API_KEY in .env with the Mosaic project key.
+docker compose up --build
+```
+
+The feed and operational health endpoint can start without the project key,
+but registration, login, OTP, session, and readiness calls deliberately fail
+closed until a valid Mosaic project key is configured.
+
+Stop the local stack with:
+
+```bash
+docker compose down
 ```
 
 ## Authentication boundary
